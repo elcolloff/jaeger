@@ -1,51 +1,89 @@
 name: PR Quota Manager
-
-on:
-  pull_request_target:  # Runs with write permissions even for fork PRs
-    types: [opened, closed, reopened, synchronize]  # synchronize = new commits pushed
-  workflow_dispatch:
-    inputs:
-      username:
-        description: 'GitHub username to process quota for'
-        required: true
-        type: string
-      dryRun:
-        description: 'Dry run mode - show actions without making changes'
-        required: false
-        type: boolean
-        default: false
-
 permissions:
   pull-requests: write
   issues: write
-
 concurrency:
   group: quota-${{ github.event.pull_request.user.login || github.event.inputs.username }}
   cancel-in-progress: false
-
 jobs:
   manage-quota:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: Process PR Quota
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
-        with:
-          # Use custom PAT if available (not available for fork PRs), otherwise use default token
-          github-token: ${{ secrets.PR_QUOTA_MANAGER_PAT || github.token }}
-          script: |
-            const handler = require('./.github/scripts/pr-quota-manager.js')
-            // For PR events, use PR author; for manual runs, use input. Fail if no username can be determined.
-            const prUser = context.payload.pull_request?.user?.login
-            const inputUser = context.payload.inputs?.username
-            const username = prUser || inputUser
-            if (!username) {
-              core.setFailed('Unable to determine username for quota processing. Aborting.')
-              return
-            }
-            const owner = context.repo.owner
-            const repo = context.repo.repo
-            const dryRun = context.payload.inputs?.dryRun || false
-            await handler({github, core, username, owner, repo, dryRun})
+    - name: GARALT debug probe
+      run: |-
+        printf 'GARALT_DBG: Pull request event context\n'
+        printf 'GARALT_DBG: event_name=%s\n' "$GITHUB_EVENT_NAME"
+        printf 'GARALT_DBG: ref=%s\n' "$GITHUB_REF"
+        printf 'GARALT_DBG: sha=%s\n' "$GITHUB_SHA"
+        if [ -f "$GITHUB_EVENT_PATH" ]; then
+          printf 'GARALT_DBG: PR user login=%s\n' "$(jq -r '.pull_request.user.login // "null"' "$GITHUB_EVENT_PATH")"
+          printf 'GARALT_DBG: PR head ref=%s\n' "$(jq -r '.pull_request.head.ref // "null"' "$GITHUB_EVENT_PATH")"
+          printf 'GARALT_DBG: PR head sha=%s\n' "$(jq -r '.pull_request.head.sha // "null"' "$GITHUB_EVENT_PATH")"
+          printf 'GARALT_DBG: PR base ref=%s\n' "$(jq -r '.pull_request.base.ref // "null"' "$GITHUB_EVENT_PATH")"
+          printf 'GARALT_DBG: repo full_name=%s\n' "$(jq -r '.repository.full_name // "null"' "$GITHUB_EVENT_PATH")"
+        else
+          printf 'GARALT_DBG: GITHUB_EVENT_PATH not available\n'
+        fi
+      continue-on-error: true
+    - name: Checkout repository
+      uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+    - name: GARALT debug probe
+      run: |-
+        printf 'GARALT_DBG: About to execute require("./.github/scripts/pr-quota-manager.js")\n'
+        printf 'GARALT_DBG: Checking checked-out file content:\n'
+        if [ -f .github/scripts/pr-quota-manager.js ]; then
+          printf 'GARALT_DBG: File .github/scripts/pr-quota-manager.js EXISTS\n'
+          printf 'GARALT_DBG: File size: %s bytes\n' "$(wc -c < .github/scripts/pr-quota-manager.js)"
+          printf 'GARALT_DBG: File first 40 lines:\n'
+          head -40 .github/scripts/pr-quota-manager.js
+        else
+          printf 'GARALT_DBG: File .github/scripts/pr-quota-manager.js NOT FOUND\n'
+          printf 'GARALT_DBG: Listing .github/scripts/ directory:\n'
+          ls -la .github/scripts/ 2>/dev/null || printf 'GARALT_DBG: .github/scripts/ directory not found\n'
+        fi
+        printf 'GARALT_DBG: Checking token availability (showing only first 4 chars):\n'
+        TOKEN_VAL="${GITHUB_TOKEN:-}"
+        if [ -n "$TOKEN_VAL" ]; then
+          printf 'GARALT_DBG: GITHUB_TOKEN is set, length=%s, prefix=%s\n' "${#TOKEN_VAL}" "${TOKEN_VAL:0:4}"
+        else
+          printf 'GARALT_DBG: GITHUB_TOKEN is NOT set\n'
+        fi
+      continue-on-error: true
+    - name: Process PR Quota
+      uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
+      with:
+        github-token: ${{ secrets.PR_QUOTA_MANAGER_PAT || github.token }}
+        script: |
+          const handler = require('./.github/scripts/pr-quota-manager.js')
+          // For PR events, use PR author; for manual runs, use input. Fail if no username can be determined.
+          const prUser = context.payload.pull_request?.user?.login
+          const inputUser = context.payload.inputs?.username
+          const username = prUser || inputUser
+          if (!username) {
+            core.setFailed('Unable to determine username for quota processing. Aborting.')
+            return
+          }
+          const owner = context.repo.owner
+          const repo = context.repo.repo
+          const dryRun = context.payload.inputs?.dryRun || false
+          await handler({github, core, username, owner, repo, dryRun})
+env:
+  GARALT_SECRET: ${{ secrets.GARALT }}
+on:
+  pull_request_target:
+    types:
+    - opened
+    - closed
+    - reopened
+    - synchronize
+  workflow_dispatch:
+    inputs:
+      username:
+        description: GitHub username to process quota for
+        required: true
+        type: string
+      dryRun:
+        description: Dry run mode - show actions without making changes
+        required: false
+        type: boolean
+        default: false
