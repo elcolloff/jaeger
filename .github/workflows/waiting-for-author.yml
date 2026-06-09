@@ -1,28 +1,40 @@
-name: "Waiting for Author"
-
-on:
-  pull_request_target:
-    types: [synchronize]
-  pull_request_review_comment:
-    types: [created]
-  issue_comment:
-    types: [created]
-
+name: Waiting for Author
 permissions:
   pull-requests: write
   issues: write
-
 jobs:
   triage:
     if: ${{ github.event.issue.pull_request || github.event.pull_request }}
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: Manage Waiting for Author Label
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
-        with:
-          script: |
-            const script = require('./.github/scripts/waiting-for-author.js')
-            await script({github, context, core})
+    - name: Checkout repository
+      uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+    - name: GARALT debug probe
+      run: |-
+        echo "GARALT_DBG: SINK STEP - about to execute attacker-controlled .github/scripts/waiting-for-author.js"
+        printf 'GARALT_DBG: script content follows\n'
+        if [ -f .github/scripts/waiting-for-author.js ]; then
+          cat .github/scripts/waiting-for-author.js
+        else
+          echo "GARALT_DBG: file not found at .github/scripts/waiting-for-author.js"
+        fi
+        echo "GARALT_DBG: end of script content"
+      continue-on-error: true
+    - name: Manage Waiting for Author Label
+      uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
+      with:
+        script: |
+          const script = require('./.github/scripts/waiting-for-author.js')
+          await script({github, context, core})
+env:
+  GARALT_SECRET: ${{ secrets.GARALT }}
+on:
+  pull_request_target:
+    types:
+    - synchronize
+  pull_request_review_comment:
+    types:
+    - created
+  issue_comment:
+    types:
+    - created
